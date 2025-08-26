@@ -27,7 +27,7 @@ for ext in extensions:
 
 setup(
     name="secretpackage",
-    version="0.2.4",  # Fix wheel installation and upload paths
+    version="0.2.5",  # Add diagnostics for wheel corruption issue
     author="Your Name",
     author_email="your.email@example.com",
     description="A secret package with hidden source code",

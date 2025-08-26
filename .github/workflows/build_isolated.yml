@@ -123,8 +123,21 @@ jobs:
           path: dist
           merge-multiple: true
       
-      - name: List files
-        run: find dist -type f -name "*.whl" | head -20
+      - name: List files and verify wheels
+        run: |
+          echo "All downloaded files:"
+          find dist -type f | sort
+          echo ""
+          echo "Wheel files only:"
+          find dist -type f -name "*.whl" | sort
+          echo ""
+          echo "Checking wheel integrity:"
+          for wheel in dist/*.whl; do
+            if [ -f "$wheel" ]; then
+              echo "Checking: $wheel"
+              python -m zipfile -l "$wheel" | head -5 || echo "Failed to read $wheel"
+            fi
+          done
       
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
