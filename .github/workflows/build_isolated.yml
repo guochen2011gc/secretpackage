@@ -62,28 +62,44 @@ jobs:
           python setup_binary.py bdist_wheel
         shell: bash
           
-      - name: Fix Linux wheel tags
-        if: runner.os == 'Linux'
+      - name: Prepare wheels for upload
         working-directory: build_workspace
         run: |
           mkdir -p wheelhouse
-          for wheel in dist/*-linux_x86_64.whl; do
-            if [ -f "$wheel" ]; then
-              newname=$(echo "$wheel" | sed 's/-linux_x86_64.whl/-manylinux_2_17_x86_64.whl/')
-              newname=$(basename "$newname")
-              cp "$wheel" "wheelhouse/$newname"
+          ls -la dist/
+          
+          # For Linux, try to rename linux-specific wheels, otherwise copy all wheels
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            renamed=false
+            for wheel in dist/*-linux_x86_64.whl; do
+              if [ -f "$wheel" ]; then
+                newname=$(echo "$wheel" | sed 's/-linux_x86_64.whl/-manylinux_2_17_x86_64.whl/')
+                newname=$(basename "$newname")
+                cp "$wheel" "wheelhouse/$newname"
+                echo "Renamed Linux wheel: $wheel -> wheelhouse/$newname"
+                renamed=true
+              fi
+            done
+            
+            # If no linux-specific wheels found, copy all wheels
+            if [ "$renamed" = "false" ]; then
+              echo "No linux_x86_64 wheels found, copying all wheels"
+              cp dist/*.whl wheelhouse/
             fi
-          done
+          else
+            # For Windows/macOS, just copy all wheels
+            cp dist/*.whl wheelhouse/
+          fi
+          
+          echo "Final wheelhouse contents:"
+          ls -la wheelhouse/
         shell: bash
           
       - name: Test wheel
         working-directory: build_workspace
         run: |
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            pip install wheelhouse/*.whl
-          else
-            pip install dist/*.whl
-          fi
+          # Install from wheelhouse (should work for all platforms now)
+          pip install wheelhouse/*.whl
           python -c "import secretpackage; print('Test passed on ${{ matrix.os }} Python ${{ matrix.python-version }}:', secretpackage.add(2, 3))"
           # Verify no source files
           python -c "import os; import secretpackage; path = os.path.dirname(secretpackage.__file__); files = os.listdir(path); py_files = [f for f in files if f.endswith('.py') and f != '__init__.py']; print(f'Source files found: {py_files}'); assert len(py_files) == 0, f'ERROR: Found source files: {py_files}'"
@@ -93,9 +109,7 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: wheel-${{ matrix.os }}-${{ matrix.python-version }}
-          path: |
-            build_workspace/dist/*.whl
-            build_workspace/wheelhouse/*.whl
+          path: build_workspace/wheelhouse/*.whl
 
   upload_to_pypi:
     name: Upload to PyPI
