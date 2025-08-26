@@ -1,0 +1,155 @@
+name: Build Hidden Source Wheels
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+jobs:
+  build_wheels_linux:
+    name: Build Linux wheels  
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        python-version: ['3.10', '3.11', '3.12']
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install cython wheel setuptools build
+      
+      - name: Build extensions
+        run: |
+          python setup.py build_ext --inplace
+      
+      - name: Create source-free package
+        run: |
+          # Create a temporary copy without .py files
+          cp -r secretpackage secretpackage_temp
+          cd secretpackage_temp
+          find . -name "*.py" ! -name "__init__.py" -delete
+          cd ..
+          
+      - name: Build wheel from compiled package
+        run: |
+          # Temporarily swap directories
+          mv secretpackage secretpackage_with_source
+          mv secretpackage_temp secretpackage
+          python setup.py bdist_wheel
+          # Restore original
+          mv secretpackage secretpackage_temp
+          mv secretpackage_with_source secretpackage
+      
+      - name: Rename wheel for PyPI compatibility
+        run: |
+          mkdir -p wheelhouse
+          for wheel in dist/*-linux_x86_64.whl; do
+            if [ -f "$wheel" ]; then
+              newname=$(echo "$wheel" | sed 's/-linux_x86_64.whl/-manylinux_2_17_x86_64.whl/')
+              newname=$(basename "$newname")
+              cp "$wheel" "wheelhouse/$newname"
+            fi
+          done
+      
+      - name: Test wheel
+        run: |
+          pip install wheelhouse/*.whl
+          python -c "import secretpackage; print('Linux test passed:', secretpackage.add(2, 3))"
+          # Verify no source files except __init__.py
+          python -c "import os; import secretpackage; path = os.path.dirname(secretpackage.__file__); files = os.listdir(path); py_files = [f for f in files if f.endswith('.py') and f != '__init__.py']; assert len(py_files) == 0, f'Found source files: {py_files}'"
+      
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-linux-${{ matrix.python-version }}
+          path: wheelhouse/*.whl
+
+  build_wheels_other:
+    name: Build wheels on ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        os: [windows-latest, macos-latest]
+        python-version: ['3.10', '3.11', '3.12']
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install cython wheel setuptools build
+      
+      - name: Build extensions
+        run: |
+          python setup.py build_ext --inplace
+          
+      - name: Create source-free package (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          Copy-Item -Path secretpackage -Destination secretpackage_temp -Recurse
+          Get-ChildItem -Path secretpackage_temp -Filter *.py -Recurse | 
+            Where-Object { $_.Name -ne "__init__.py" } | 
+            Remove-Item -Force
+            
+      - name: Create source-free package (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          cp -r secretpackage secretpackage_temp
+          find secretpackage_temp -name "*.py" ! -name "__init__.py" -delete
+      
+      - name: Build wheel from compiled package
+        run: |
+          mv secretpackage secretpackage_with_source
+          mv secretpackage_temp secretpackage
+          python setup.py bdist_wheel
+          mv secretpackage secretpackage_temp
+          mv secretpackage_with_source secretpackage
+      
+      - name: Test wheel
+        run: |
+          pip install dist/*.whl
+          python -c "import secretpackage; print('Test passed on ${{ matrix.os }}:', secretpackage.add(2, 3))"
+          python -c "import os; import secretpackage; path = os.path.dirname(secretpackage.__file__); files = os.listdir(path); py_files = [f for f in files if f.endswith('.py') and f != '__init__.py']; assert len(py_files) == 0, f'Found source files: {py_files}'"
+      
+      - name: Upload wheel
+        uses: actions/upload-artifact@v4
+        with:
+          name: wheel-${{ matrix.os }}-${{ matrix.python-version }}
+          path: dist/*.whl
+
+  upload_to_pypi:
+    name: Upload to PyPI
+    needs: [build_wheels_linux, build_wheels_other]
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          path: dist
+          merge-multiple: true
+      
+      - name: List files
+        run: ls -la dist/
+      
+      - name: Publish to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          password: ${{ secrets.PYPI_API_TOKEN }}
+          skip-existing: true

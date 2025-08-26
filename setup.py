@@ -27,7 +27,7 @@ for ext in extensions:
 
 setup(
     name="secretpackage",
-    version="0.1.9",  # Bump version for new release
+    version="0.2.0",  # Major update: source code now properly hidden
     author="Your Name",
     author_email="your.email@example.com",
     description="A secret package with hidden source code",
