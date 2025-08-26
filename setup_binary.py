@@ -3,7 +3,7 @@ from setuptools import setup, find_packages
 # This is a simplified setup.py that only packages compiled files
 setup(
     name="secretpackage",
-    version="0.2.2",
+    version="0.2.3",
     author="Your Name",
     author_email="your.email@example.com",
     description="A secret package with hidden source code",

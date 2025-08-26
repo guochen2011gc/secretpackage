@@ -31,7 +31,8 @@ jobs:
       - name: Create isolated workspace
         run: |
           mkdir build_workspace
-          cp -r . build_workspace/
+          # Copy all files except build_workspace directory to avoid infinite recursion
+          find . -maxdepth 1 -not -name "." -not -name "build_workspace" -exec cp -r {} build_workspace/ \;
         shell: bash
           
       - name: Build extensions in isolation

@@ -27,7 +27,7 @@ for ext in extensions:
 
 setup(
     name="secretpackage",
-    version="0.2.2",  # Fix parallel build isolation issue
+    version="0.2.3",  # Fix recursive copy infinite loop
     author="Your Name",
     author_email="your.email@example.com",
     description="A secret package with hidden source code",
