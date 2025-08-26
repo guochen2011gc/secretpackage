@@ -12,7 +12,7 @@ if os.path.exists(package_dir):
 
 setup(
     name="secretpackage",
-    version="0.2.6",
+    version="0.2.8",
     author="Your Name",
     author_email="your.email@example.com",
     description="A secret package with hidden source code",
@@ -35,4 +35,6 @@ setup(
         "Operating System :: OS Independent",
     ],
     zip_safe=False,
+    # Force platform-specific wheel since we have compiled extensions
+    has_ext_modules=lambda: True,
 )
