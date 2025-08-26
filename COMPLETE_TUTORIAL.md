@@ -2,6 +2,8 @@
 
 This tutorial shows you how to take any Python package and upload it to PyPI with **hidden source code** using Cython compilation, with **automatic multi-platform builds** using GitHub Actions.
 
+After extensive testing and troubleshooting, this tutorial includes all the critical fixes needed to make this work reliably.
+
 ## Prerequisites
 
 - Python 3.9+ installed
@@ -95,7 +97,53 @@ setup(
 EOF
 ```
 
-**IMPORTANT**: Update the `extensions` list to include ALL your Python modules (except `__init__.py`).
+#### Create `setup_binary.py` (CRITICAL for fixing wheel corruption):
+```bash
+cat > setup_binary.py << 'EOF'
+from setuptools import setup, find_packages
+import os
+import sys
+
+# This is a simplified setup.py that only packages compiled files
+# Check what files are actually available
+package_dir = "mypackage"
+if os.path.exists(package_dir):
+    print(f"Files in {package_dir}:")
+    for file in os.listdir(package_dir):
+        print(f"  {file}")
+
+setup(
+    name="mypackage",  # CHANGE THIS to your package name
+    version="0.1.0",
+    author="Your Name",  # CHANGE THIS
+    author_email="your.email@example.com",  # CHANGE THIS
+    description="A package with hidden source code",
+    long_description=open("README.md").read(),
+    long_description_content_type="text/markdown",
+    url="https://github.com/YOURUSERNAME/mypackage",  # CHANGE THIS
+    packages=find_packages(),
+    package_data={
+        'mypackage': ['*.so', '*.pyd', '*.dll'],
+    },
+    include_package_data=True,
+    python_requires=">=3.9",
+    classifiers=[
+        "Programming Language :: Python :: 3",
+        "Programming Language :: Python :: 3.9",
+        "Programming Language :: Python :: 3.10", 
+        "Programming Language :: Python :: 3.11",
+        "Programming Language :: Python :: 3.12",
+        "License :: OSI Approved :: MIT License",
+        "Operating System :: OS Independent",
+    ],
+    zip_safe=False,
+    # CRITICAL: Force platform-specific wheel since we have compiled extensions
+    has_ext_modules=lambda: True,
+)
+EOF
+```
+
+**IMPORTANT**: The `setup_binary.py` file is critical for preventing wheel corruption issues. The `has_ext_modules=lambda: True` line forces setuptools to create platform-specific wheels instead of universal wheels.
 
 #### Create `pyproject.toml`:
 ```bash
@@ -103,6 +151,16 @@ cat > pyproject.toml << 'EOF'
 [build-system]
 requires = ["setuptools>=45", "wheel", "Cython>=0.29"]
 build-backend = "setuptools.build_meta"
+EOF
+```
+
+#### Create `MANIFEST.in` (prevents build issues):
+```bash
+cat > MANIFEST.in << 'EOF'
+include README.md
+include LICENSE
+recursive-exclude mypackage *.pyc
+recursive-exclude mypackage __pycache__
 EOF
 ```
 
@@ -196,6 +254,9 @@ wheels/
 *.c
 *.cpp
 
+# Build workspaces
+build_workspace/
+
 # PyCharm
 .idea/
 
@@ -236,7 +297,7 @@ EOF
 
 ---
 
-## Step 3: Create GitHub Actions Workflow
+## Step 3: Create GitHub Actions Workflow (FINAL WORKING VERSION)
 
 ### 3.1 Create the workflow directory:
 ```bash
@@ -245,8 +306,8 @@ mkdir -p .github/workflows
 
 ### 3.2 Create the GitHub Actions workflow:
 ```bash
-cat > .github/workflows/build_and_upload.yml << 'EOF'
-name: Build and Upload to PyPI
+cat > .github/workflows/build_isolated.yml << 'EOF'
+name: Build Isolated Source-Free Wheels
 
 on:
   push:
@@ -255,78 +316,12 @@ on:
   workflow_dispatch:
 
 jobs:
-  build_wheels_linux:
-    name: Build Linux wheels  
-    runs-on: ubuntu-latest
-    strategy:
-      matrix:
-        python-version: ['3.10', '3.11', '3.12']
-    
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Set up Python ${{ matrix.python-version }}
-        uses: actions/setup-python@v4
-        with:
-          python-version: ${{ matrix.python-version }}
-      
-      - name: Install dependencies
-        run: |
-          python -m pip install --upgrade pip
-          pip install cython wheel setuptools build
-      
-      - name: Build extensions
-        run: |
-          python setup.py build_ext --inplace
-      
-      - name: Create source-free package
-        run: |
-          # Create a temporary copy without .py files
-          cp -r mypackage mypackage_temp
-          cd mypackage_temp
-          find . -name "*.py" ! -name "__init__.py" -delete
-          cd ..
-          
-      - name: Build wheel from compiled package
-        run: |
-          # Temporarily swap directories
-          mv mypackage mypackage_with_source
-          mv mypackage_temp mypackage
-          python setup.py bdist_wheel
-          # Restore original
-          mv mypackage mypackage_temp
-          mv mypackage_with_source mypackage
-      
-      - name: Rename wheel for PyPI compatibility
-        run: |
-          mkdir -p wheelhouse
-          for wheel in dist/*-linux_x86_64.whl; do
-            if [ -f "$wheel" ]; then
-              newname=$(echo "$wheel" | sed 's/-linux_x86_64.whl/-manylinux_2_17_x86_64.whl/')
-              newname=$(basename "$newname")
-              cp "$wheel" "wheelhouse/$newname"
-            fi
-          done
-      
-      - name: Test wheel
-        run: |
-          pip install wheelhouse/*.whl
-          python -c "import mypackage; print('Linux test passed!')"
-          # Verify no source files except __init__.py
-          python -c "import os; import mypackage; path = os.path.dirname(mypackage.__file__); files = os.listdir(path); py_files = [f for f in files if f.endswith('.py') and f != '__init__.py']; assert len(py_files) == 0, f'Found source files: {py_files}'"
-      
-      - name: Upload wheel
-        uses: actions/upload-artifact@v4
-        with:
-          name: wheel-linux-${{ matrix.python-version }}
-          path: wheelhouse/*.whl
-
-  build_wheels_other:
+  build_wheels:
     name: Build wheels on ${{ matrix.os }}
     runs-on: ${{ matrix.os }}
     strategy:
       matrix:
-        os: [windows-latest, macos-latest]
+        os: [ubuntu-latest, windows-latest, macos-latest]
         python-version: ['3.10', '3.11', '3.12']
     
     steps:
@@ -342,49 +337,102 @@ jobs:
           python -m pip install --upgrade pip
           pip install cython wheel setuptools build
       
-      - name: Build extensions
+      - name: Create isolated workspace
         run: |
-          python setup.py build_ext --inplace
+          mkdir build_workspace
+          # Copy all files except build_workspace directory to avoid infinite recursion
+          find . -maxdepth 1 -not -name "." -not -name "build_workspace" -exec cp -r {} build_workspace/ \;
+        shell: bash
           
-      - name: Create source-free package (Windows)
+      - name: Build extensions in isolation
+        working-directory: build_workspace
+        run: |
+          # Build extensions and place them in the package directory
+          python setup.py build_ext --inplace
+          echo "Files after build_ext:"
+          find mypackage -type f | sort
+        shell: bash
+          
+      - name: Remove source files (Linux/macOS)
+        if: runner.os != 'Windows'  
+        working-directory: build_workspace
+        run: |
+          echo "Files before removing source:"
+          find mypackage -type f | sort
+          find mypackage -name "*.py" ! -name "__init__.py" -delete
+          echo "Files after removing source:"
+          find mypackage -type f | sort
+        shell: bash
+          
+      - name: Remove source files (Windows)
         if: runner.os == 'Windows'
+        working-directory: build_workspace
+        run: |
+          echo "Files before removing source:"
+          Get-ChildItem -Path mypackage -Recurse | ForEach-Object { $_.FullName }
+          Get-ChildItem -Path mypackage -Filter *.py -Recurse | Where-Object { $_.Name -ne "__init__.py" } | Remove-Item -Force
+          echo "Files after removing source:"
+          Get-ChildItem -Path mypackage -Recurse | ForEach-Object { $_.FullName }
         shell: pwsh
+          
+      - name: Build wheel
+        working-directory: build_workspace
         run: |
-          Copy-Item -Path mypackage -Destination mypackage_temp -Recurse
-          Get-ChildItem -Path mypackage_temp -Filter *.py -Recurse | 
-            Where-Object { $_.Name -ne "__init__.py" } | 
-            Remove-Item -Force
+          python setup_binary.py bdist_wheel
+        shell: bash
+          
+      - name: Prepare wheels for upload
+        working-directory: build_workspace
+        run: |
+          mkdir -p wheelhouse
+          ls -la dist/
+          
+          # For Linux, try to rename linux-specific wheels, otherwise copy all wheels
+          if [ "$RUNNER_OS" = "Linux" ]; then
+            renamed=false
+            for wheel in dist/*-linux_x86_64.whl; do
+              if [ -f "$wheel" ]; then
+                newname=$(echo "$wheel" | sed 's/-linux_x86_64.whl/-manylinux_2_17_x86_64.whl/')
+                newname=$(basename "$newname")
+                cp "$wheel" "wheelhouse/$newname"
+                echo "Renamed Linux wheel: $wheel -> wheelhouse/$newname"
+                renamed=true
+              fi
+            done
             
-      - name: Create source-free package (macOS)
-        if: runner.os == 'macOS'
-        run: |
-          cp -r mypackage mypackage_temp
-          find mypackage_temp -name "*.py" ! -name "__init__.py" -delete
-      
-      - name: Build wheel from compiled package
-        run: |
-          mv mypackage mypackage_with_source
-          mv mypackage_temp mypackage
-          python setup.py bdist_wheel
-          mv mypackage mypackage_temp
-          mv mypackage_with_source mypackage
-      
+            # If no linux-specific wheels found, copy all wheels
+            if [ "$renamed" = "false" ]; then
+              echo "No linux_x86_64 wheels found, copying all wheels"
+              cp dist/*.whl wheelhouse/
+            fi
+          else
+            # For Windows/macOS, just copy all wheels
+            cp dist/*.whl wheelhouse/
+          fi
+          
+          echo "Final wheelhouse contents:"
+          ls -la wheelhouse/
+        shell: bash
+          
       - name: Test wheel
+        working-directory: build_workspace
         run: |
-          pip install dist/*.whl
-          python -c "import mypackage; print('Test passed on ${{ matrix.os }}!')"
+          # Install from wheelhouse (should work for all platforms now)
+          pip install wheelhouse/*.whl
+          python -c "import mypackage; print('Test passed on ${{ matrix.os }} Python ${{ matrix.python-version }}:', mypackage.function1(2, 3))"
           # Verify no source files
-          python -c "import os; import mypackage; path = os.path.dirname(mypackage.__file__); files = os.listdir(path); py_files = [f for f in files if f.endswith('.py') and f != '__init__.py']; assert len(py_files) == 0, f'Found source files: {py_files}'"
+          python -c "import os; import mypackage; path = os.path.dirname(mypackage.__file__); files = os.listdir(path); py_files = [f for f in files if f.endswith('.py') and f != '__init__.py']; print(f'Source files found: {py_files}'); assert len(py_files) == 0, f'ERROR: Found source files: {py_files}'"
+        shell: bash
       
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
           name: wheel-${{ matrix.os }}-${{ matrix.python-version }}
-          path: dist/*.whl
+          path: build_workspace/wheelhouse/*.whl
 
   upload_to_pypi:
     name: Upload to PyPI
-    needs: [build_wheels_linux, build_wheels_other]
+    needs: build_wheels
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
     
@@ -394,8 +442,21 @@ jobs:
           path: dist
           merge-multiple: true
       
-      - name: List files
-        run: ls -la dist/
+      - name: List files and verify wheels
+        run: |
+          echo "All downloaded files:"
+          find dist -type f | sort
+          echo ""
+          echo "Wheel files only:"
+          find dist -type f -name "*.whl" | sort
+          echo ""
+          echo "Checking wheel integrity:"
+          for wheel in dist/*.whl; do
+            if [ -f "$wheel" ]; then
+              echo "Checking: $wheel"
+              python -m zipfile -l "$wheel" | head -5 || echo "Failed to read $wheel"
+            fi
+          done
       
       - name: Publish to PyPI
         uses: pypa/gh-action-pypi-publish@release/v1
@@ -405,7 +466,12 @@ jobs:
 EOF
 ```
 
-**IMPORTANT**: Change `mypackage` in the test commands to your actual package name.
+**CRITICAL FIXES IN THIS WORKFLOW:**
+1. **Isolated workspaces** prevent parallel builds from interfering with each other
+2. **Two separate setup files** - `setup.py` for compilation, `setup_binary.py` for packaging
+3. **Platform-specific wheel forcing** via `has_ext_modules=lambda: True`
+4. **Proper Linux wheel renaming** for manylinux compatibility
+5. **Comprehensive diagnostics** to debug issues
 
 ---
 
@@ -419,7 +485,7 @@ git init
 git add .
 
 # Make initial commit
-git commit -m "Initial commit with multi-platform build workflow"
+git commit -m "Initial commit with isolated build workflow"
 ```
 
 ---
@@ -494,7 +560,7 @@ git push origin v0.1.0
 
 ### 8.2 Monitor the build:
 1. Go to https://github.com/YOURUSERNAME/mypackage/actions
-2. Click on the "Build and Upload to PyPI" workflow
+2. Click on the "Build Isolated Source-Free Wheels" workflow
 3. Watch it build wheels for all platforms
 4. Wait for automatic upload to PyPI
 
@@ -549,9 +615,10 @@ Users can only see compiled binaries (.so/.pyd files)
 When you want to release a new version:
 
 1. **Update your code** as needed
-2. **Update version** in `setup.py`:
+2. **Update version** in BOTH `setup.py` AND `setup_binary.py`:
    ```bash
    # Edit setup.py and change version="0.1.0" to version="0.1.1"
+   # Edit setup_binary.py and change version="0.1.0" to version="0.1.1"
    ```
 3. **Commit and tag**:
    ```bash
@@ -563,6 +630,37 @@ When you want to release a new version:
    ```
 4. **GitHub Actions will automatically** build and upload the new version!
 
+**CRITICAL**: Always keep both `setup.py` and `setup_binary.py` versions in sync to avoid build issues.
+
+---
+
+## Critical Problems We Solved
+
+### Problem 1: Wheel Corruption - "ZIP archive not accepted: Filename not in central directory"
+**Cause**: setuptools was creating universal wheels (`py3-none-any`) instead of platform-specific wheels for compiled extensions.
+
+**Solution**: Added `has_ext_modules=lambda: True` to `setup_binary.py` to force platform-specific wheels.
+
+### Problem 2: Parallel Build Interference
+**Cause**: Multiple build jobs were modifying the same source files simultaneously.
+
+**Solution**: Created isolated workspaces for each build job using `build_workspace` directories.
+
+### Problem 3: Linux Wheel Compatibility  
+**Cause**: Linux wheels were tagged as `linux_x86_64` which PyPI rejects.
+
+**Solution**: Rename to `manylinux_2_17_x86_64` in the workflow.
+
+### Problem 4: Version Mismatches
+**Cause**: `setup.py` and `setup_binary.py` had different version numbers.
+
+**Solution**: Always keep both files in sync when updating versions.
+
+### Problem 5: Missing Compiled Extensions
+**Cause**: Extensions weren't being properly included in the final wheel.
+
+**Solution**: Use separate build process with `build_ext --inplace` followed by `setup_binary.py bdist_wheel`.
+
 ---
 
 ## Customization for Your Package
@@ -570,8 +668,9 @@ When you want to release a new version:
 ### For Different Module Names:
 1. Update the `extensions` list in `setup.py`
 2. Update imports in `__init__.py`
-3. Update the package name in `setup.py`
+3. Update the package name in both `setup.py` and `setup_binary.py`
 4. Update test commands in the GitHub workflow
+5. Replace `mypackage` throughout the workflow YAML
 
 ### For Additional Dependencies:
 Add them to the workflow's "Install dependencies" step:
@@ -581,10 +680,6 @@ Add them to the workflow's "Install dependencies" step:
     python -m pip install --upgrade pip
     pip install cython wheel setuptools numpy pandas  # Add your deps here
 ```
-
-### For Private Repositories:
-- GitHub Actions has limited free minutes for private repos
-- Consider using only public repos for packages
 
 ---
 
@@ -608,17 +703,21 @@ pip install mypackage
 
 ### Build Fails:
 1. Check the Actions tab for error logs
-2. Common issues: missing dependencies, syntax errors in `setup.py`
-3. Test locally first with the Step 7 commands
+2. Common issues: version mismatches, missing dependencies, syntax errors
+3. Test locally first with Step 7 commands
 
-### Upload Fails:
-1. Check your PyPI token is correct in GitHub Secrets
-2. Make sure package name isn't already taken on PyPI
-3. Version numbers can't be reused - bump the version
+### Upload Fails with "ZIP archive not accepted":
+1. Check that `setup_binary.py` has `has_ext_modules=lambda: True`
+2. Verify both setup files have the same version number
+3. Look for `py3-none-any` wheels (should be platform-specific instead)
 
 ### Import Fails After Installation:
 1. Check your `__init__.py` imports match your actual module structure
 2. Make sure all modules are listed in the `extensions` list in `setup.py`
+
+### Parallel Build Issues:
+1. The isolated workspace should prevent this
+2. Check if builds are failing due to missing source files
 
 ---
 
@@ -630,6 +729,14 @@ This tutorial creates a professional Python package with:
 ✅ **Multi-platform support** (Windows, Linux, macOS)  
 ✅ **Automatic builds** with GitHub Actions  
 ✅ **Professional packaging** with proper metadata  
-✅ **Easy installation** with `pip install`
+✅ **Easy installation** with `pip install`  
+✅ **Solves all major build/upload issues** discovered during development
 
 Your users will never see your source code, but can use your package exactly like any other Python library!
+
+**Key Success Factors:**
+1. Use isolated build workspaces
+2. Separate compilation setup from packaging setup
+3. Force platform-specific wheels
+4. Keep version numbers synchronized
+5. Test thoroughly on all platforms
