@@ -29,14 +29,16 @@ jobs:
       - name: Build wheels
         uses: pypa/cibuildwheel@v2.16.2
         env:
-          # Build for Python 3.8-3.12
-          CIBW_BUILD: cp38-* cp39-* cp310-* cp311-* cp312-*
+          # Build for Python 3.9-3.12 (simplified)
+          CIBW_BUILD: cp39-* cp310-* cp311-* cp312-*
           # Skip 32-bit builds and musl linux
-          CIBW_SKIP: "*-win32 *-musllinux_* *i686"
+          CIBW_SKIP: "*-win32 *-musllinux_i686 *-musllinux_aarch64"
           # Install Cython before building
           CIBW_BEFORE_BUILD: pip install cython setuptools wheel
           # Test that the wheel works after building
           CIBW_TEST_COMMAND: python -c "import secretpackage; print('Test passed:', secretpackage.add(2, 3))"
+        with:
+          output-dir: wheelhouse
       
       - uses: actions/upload-artifact@v4
         with:

@@ -27,7 +27,7 @@ for ext in extensions:
 
 setup(
     name="secretpackage",
-    version="0.1.3",  # Bump version for new release
+    version="0.1.4",  # Bump version for new release
     author="Your Name",
     author_email="your.email@example.com",
     description="A secret package with hidden source code",
@@ -40,10 +40,9 @@ setup(
         'boundscheck': False,
         'wraparound': False,
     }),
-    python_requires=">=3.8",
+    python_requires=">=3.9",
     classifiers=[
         "Programming Language :: Python :: 3",
-        "Programming Language :: Python :: 3.8",
         "Programming Language :: Python :: 3.9",
         "Programming Language :: Python :: 3.10",
         "Programming Language :: Python :: 3.11",
