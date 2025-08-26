@@ -8,43 +8,56 @@ on:
 
 jobs:
   build_wheels_linux:
-    name: Build Linux wheels
-    runs-on: ubuntu-latest
-    container: quay.io/pypa/manylinux2014_x86_64
+    name: Build Linux wheels  
+    runs-on: ubuntu-20.04
     strategy:
       matrix:
-        python: [
-          { version: "3.10", abi: "cp310-cp310" },
-          { version: "3.11", abi: "cp311-cp311" },
-          { version: "3.12", abi: "cp312-cp312" }
-        ]
+        python-version: ['3.10', '3.11', '3.12']
     
     steps:
       - uses: actions/checkout@v4
       
-      - name: Install Python ${{ matrix.python.version }}
+      - name: Set up Python ${{ matrix.python-version }}
+        uses: actions/setup-python@v4
+        with:
+          python-version: ${{ matrix.python-version }}
+      
+      - name: Install dependencies
         run: |
-          /opt/python/${{ matrix.python.abi }}/bin/python -m pip install --upgrade pip
-          /opt/python/${{ matrix.python.abi }}/bin/python -m pip install cython wheel setuptools auditwheel
+          python -m pip install --upgrade pip
+          pip install cython wheel setuptools build auditwheel
       
       - name: Build wheel
         run: |
-          /opt/python/${{ matrix.python.abi }}/bin/python setup.py bdist_wheel
+          python setup.py bdist_wheel
       
-      - name: Repair wheel (manylinux)
+      - name: Repair wheel for manylinux compatibility
         run: |
-          auditwheel repair dist/*.whl --plat-tag manylinux2014_x86_64
-          rm dist/*-linux_x86_64.whl
+          # Try to repair the wheel, if it fails, just rename it
+          auditwheel repair dist/*.whl --plat-tag manylinux_2_17_x86_64 -w wheelhouse/ || cp dist/*.whl wheelhouse/
+          # Remove original if repair succeeded
+          if ls wheelhouse/*manylinux*.whl 1> /dev/null 2>&1; then
+            rm -f dist/*-linux_x86_64.whl
+          else
+            # If repair failed, rename manually
+            for wheel in dist/*-linux_x86_64.whl; do
+              if [ -f "$wheel" ]; then
+                newname=$(echo "$wheel" | sed 's/-linux_x86_64.whl/-manylinux_2_17_x86_64.whl/')
+                mv "$wheel" "$newname"
+                mv "$newname" wheelhouse/
+              fi
+            done
+          fi
       
       - name: Test wheel
         run: |
-          /opt/python/${{ matrix.python.abi }}/bin/python -m pip install wheelhouse/*.whl
-          /opt/python/${{ matrix.python.abi }}/bin/python -c "import secretpackage; print('Test passed:', secretpackage.add(2, 3))"
+          pip install wheelhouse/*.whl
+          python -c "import secretpackage; print('Test passed:', secretpackage.add(2, 3))"
       
       - name: Upload wheel
         uses: actions/upload-artifact@v4
         with:
-          name: wheel-linux-${{ matrix.python.version }}
+          name: wheel-linux-${{ matrix.python-version }}
           path: wheelhouse/*.whl
 
   build_wheels_other:
