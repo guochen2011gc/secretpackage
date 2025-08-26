@@ -1,0 +1,5 @@
+include README.md
+include LICENSE
+exclude secretpackage/*.py
+exclude secretpackage/*.pyc
+include secretpackage/__init__.py
