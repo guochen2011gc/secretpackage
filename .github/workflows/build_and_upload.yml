@@ -27,27 +27,48 @@ jobs:
           python -m pip install --upgrade pip
           pip install cython wheel setuptools build
       
-      - name: Build extensions
+      - name: Build extensions and create source-free wheel
         run: |
+          # First build extensions normally
           python setup.py build_ext --inplace
-      
-      - name: Create source-free package
-        run: |
-          # Create a temporary copy without .py files
-          cp -r secretpackage secretpackage_temp
-          cd secretpackage_temp
-          find . -name "*.py" ! -name "__init__.py" -delete
-          cd ..
           
-      - name: Build wheel from compiled package
-        run: |
-          # Temporarily swap directories
-          mv secretpackage secretpackage_with_source
-          mv secretpackage_temp secretpackage
-          python setup.py bdist_wheel
-          # Restore original
-          mv secretpackage secretpackage_temp
-          mv secretpackage_with_source secretpackage
+          # Create a temporary setup.py that doesn't need source files
+          cat > setup_binary_only.py << 'EOF'
+          from setuptools import setup, find_packages
+          
+          setup(
+              name="secretpackage",
+              version="0.2.0",
+              author="Your Name",
+              author_email="your.email@example.com",
+              description="A secret package with hidden source code",
+              long_description=open("README.md").read(),
+              long_description_content_type="text/markdown",
+              url="https://github.com/guochen2011gc/secretpackage",
+              packages=find_packages(),
+              package_data={
+                  'secretpackage': ['*.so', '*.pyd'],
+              },
+              include_package_data=True,
+              python_requires=">=3.9",
+              classifiers=[
+                  "Programming Language :: Python :: 3",
+                  "Programming Language :: Python :: 3.9",
+                  "Programming Language :: Python :: 3.10",
+                  "Programming Language :: Python :: 3.11",
+                  "Programming Language :: Python :: 3.12",
+                  "License :: OSI Approved :: MIT License",
+                  "Operating System :: OS Independent",
+              ],
+              zip_safe=False,
+          )
+          EOF
+          
+          # Remove source .py files (except __init__.py)
+          find secretpackage -name "*.py" ! -name "__init__.py" -delete
+          
+          # Build wheel with binary-only setup
+          python setup_binary_only.py bdist_wheel
       
       - name: Rename wheel for PyPI compatibility
         run: |
@@ -94,32 +115,63 @@ jobs:
           python -m pip install --upgrade pip
           pip install cython wheel setuptools build
       
-      - name: Build extensions
+      - name: Build extensions and create source-free wheel
         run: |
+          # First build extensions normally
           python setup.py build_ext --inplace
           
-      - name: Create source-free package (Windows)
+          # Create a temporary setup.py that doesn't need source files
+          python -c "
+          setup_content = '''
+          from setuptools import setup, find_packages
+          
+          setup(
+              name=\"secretpackage\",
+              version=\"0.2.1\", 
+              author=\"Your Name\",
+              author_email=\"your.email@example.com\",
+              description=\"A secret package with hidden source code\",
+              long_description=open(\"README.md\").read(),
+              long_description_content_type=\"text/markdown\",
+              url=\"https://github.com/guochen2011gc/secretpackage\",
+              packages=find_packages(),
+              package_data={
+                  \"secretpackage\": [\"*.so\", \"*.pyd\"],
+              },
+              include_package_data=True,
+              python_requires=\">=3.9\",
+              classifiers=[
+                  \"Programming Language :: Python :: 3\",
+                  \"Programming Language :: Python :: 3.9\",
+                  \"Programming Language :: Python :: 3.10\",
+                  \"Programming Language :: Python :: 3.11\",
+                  \"Programming Language :: Python :: 3.12\",
+                  \"License :: OSI Approved :: MIT License\",
+                  \"Operating System :: OS Independent\",
+              ],
+              zip_safe=False,
+          )
+          '''
+          with open('setup_binary_only.py', 'w') as f:
+              f.write(setup_content)
+          "
+          
+      - name: Remove source files (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          Copy-Item -Path secretpackage -Destination secretpackage_temp -Recurse
-          Get-ChildItem -Path secretpackage_temp -Filter *.py -Recurse | 
+          Get-ChildItem -Path secretpackage -Filter *.py -Recurse | 
             Where-Object { $_.Name -ne "__init__.py" } | 
             Remove-Item -Force
             
-      - name: Create source-free package (macOS)
+      - name: Remove source files (macOS)  
         if: runner.os == 'macOS'
         run: |
-          cp -r secretpackage secretpackage_temp
-          find secretpackage_temp -name "*.py" ! -name "__init__.py" -delete
+          find secretpackage -name "*.py" ! -name "__init__.py" -delete
       
       - name: Build wheel from compiled package
         run: |
-          mv secretpackage secretpackage_with_source
-          mv secretpackage_temp secretpackage
-          python setup.py bdist_wheel
-          mv secretpackage secretpackage_temp
-          mv secretpackage_with_source secretpackage
+          python setup_binary_only.py bdist_wheel
       
       - name: Test wheel
         run: |

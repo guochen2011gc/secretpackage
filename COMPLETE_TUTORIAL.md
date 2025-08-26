@@ -514,6 +514,34 @@ pip install mypackage
 python -c "import mypackage; print('Installation successful!')"
 ```
 
+### 9.3 **CRITICAL**: Verify source code is hidden:
+```bash
+# Verify no source files are visible to users
+python -c "
+import os
+import mypackage
+path = os.path.dirname(mypackage.__file__)
+files = os.listdir(path)
+py_files = [f for f in files if f.endswith('.py') and f != '__init__.py']
+print(f'Python source files found: {py_files}')
+print(f'All files: {files}')
+if len(py_files) == 0:
+    print('✅ SUCCESS: Source code is properly hidden!')
+    print('Users can only see compiled binaries (.so/.pyd files)')
+else:
+    print('❌ ERROR: Source files are visible!')
+    print('The workflow needs to be fixed.')
+"
+```
+
+**Expected output:**
+```
+Python source files found: []
+All files: ['__init__.py', 'module1.cpython-312-linux_x86_64.so', 'module2.cpython-312-linux_x86_64.so', ...]
+✅ SUCCESS: Source code is properly hidden!
+Users can only see compiled binaries (.so/.pyd files)
+```
+
 ---
 
 ## Step 10: For Future Updates
