@@ -27,13 +27,13 @@ for ext in extensions:
 
 setup(
     name="secretpackage",
-    version="0.1.1",  # Bump version for new release
+    version="0.1.2",  # Bump version for new release
     author="Your Name",
     author_email="your.email@example.com",
     description="A secret package with hidden source code",
     long_description=open("README.md").read(),
     long_description_content_type="text/markdown",
-    url="https://github.com/yourusername/secretpackage",
+    url="https://github.com/guochen2011gc/secretpackage",
     packages=find_packages(),
     ext_modules=cythonize(extensions, compiler_directives={
         'language_level': "3",
