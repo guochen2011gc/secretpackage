@@ -38,22 +38,32 @@ jobs:
       - name: Build extensions in isolation
         working-directory: build_workspace
         run: |
-          # Build extensions normally
+          # Build extensions and place them in the package directory
           python setup.py build_ext --inplace
+          echo "Files after build_ext:"
+          find secretpackage -type f | sort
         shell: bash
           
       - name: Remove source files (Linux/macOS)
         if: runner.os != 'Windows'  
         working-directory: build_workspace
         run: |
+          echo "Files before removing source:"
+          find secretpackage -type f | sort
           find secretpackage -name "*.py" ! -name "__init__.py" -delete
+          echo "Files after removing source:"
+          find secretpackage -type f | sort
         shell: bash
           
       - name: Remove source files (Windows)
         if: runner.os == 'Windows'
         working-directory: build_workspace
         run: |
+          echo "Files before removing source:"
+          Get-ChildItem -Path secretpackage -Recurse | ForEach-Object { $_.FullName }
           Get-ChildItem -Path secretpackage -Filter *.py -Recurse | Where-Object { $_.Name -ne "__init__.py" } | Remove-Item -Force
+          echo "Files after removing source:"
+          Get-ChildItem -Path secretpackage -Recurse | ForEach-Object { $_.FullName }
         shell: pwsh
           
       - name: Build wheel
